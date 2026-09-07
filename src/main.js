@@ -163,7 +163,8 @@ function render() {
             <p>Не сайты с формами, а машиночитаемые выгрузки и REST.</p>
             <div class="sources">${sources}</div>
             <label class="file" style="margin-top:10px">Open data ФНС XML<input id="opendata" type="file" accept=".xml,text/xml,application/xml" /></label>
-            <button class="ghost" type="button" id="demo" style="margin-top:8px;min-height:40px">Демо-выписка</button>
+            <button class="ghost" type="button" id="demo" style="margin-top:8px;min-height:40px">Демо ООО</button>
+            <button class="ghost" type="button" id="rosbank" style="margin-top:8px;min-height:40px">Пример: Росбанк</button>
           </section>
           <section class="card">
             <h3>REST Федресурса</h3>
@@ -184,6 +185,7 @@ function render() {
   document.getElementById("xml").addEventListener("change", onXml);
   document.getElementById("opendata").addEventListener("change", onOpenData);
   document.getElementById("demo").addEventListener("click", onDemo);
+  document.getElementById("rosbank").addEventListener("click", onRosbank);
   document.getElementById("api-form").addEventListener("submit", onSaveKeys);
 }
 
@@ -284,6 +286,15 @@ async function onDemo() {
   const card = parseEgrulXml(await res.text());
   state.inn = card.inn;
   applyCard(card, { headcount: 1, taxPaid: 0, taxDebt: 240000, fixedAssets: 0 });
+}
+
+async function onRosbank() {
+  const res = await fetch("./sample-rosbank-egrul.xml");
+  const card = parseEgrulXml(await res.text());
+  state.inn = card.inn;
+  state.notice =
+    "Пример ПАО РОСБАНК (ИНН 7730060164): ликвидирован 01.01.2025 реорганизацией. Для ЕФРСБ: demowebuser / Ax!761BN, демо-контур.";
+  applyCard(card, { headcount: 9969, taxPaid: null, taxDebt: null });
 }
 
 render();

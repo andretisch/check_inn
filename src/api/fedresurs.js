@@ -11,6 +11,17 @@ function parseJson(body, fallbackMessage) {
   }
 }
 
+function isoDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function last31DayWindow() {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 30);
+  return { begin: isoDate(start), end: isoDate(end) };
+}
+
 export async function searchBankruptcy({ inn, login, password, demo = true }) {
   const base = demo ? DEMO : PROD;
   const auth = await browserRequest(`${base}/v1/auth`, {
@@ -19,26 +30,41 @@ export async function searchBankruptcy({ inn, login, password, demo = true }) {
     body: JSON.stringify({ login, password }),
   });
   if (!auth.ok) {
-    const hint = auth.status === 0
-      ? "Браузер заблокировал REST Федресурса (CORS). Ключи остаются у вас, но запрос нужно слать из расширения."
-      : `Федресурс auth HTTP ${auth.status}`;
+    const hint =
+      auth.status === 0
+        ? "Браузер заблокировал REST Федресурса (CORS). Ключи остаются у вас, но запрос нужно слать из расширения."
+        : `Федресурс auth HTTP ${auth.status}`;
     throw new Error(hint);
   }
   const payload = parseJson(auth.body, "Федресурс вернул не JSON на /v1/auth");
-  const token = payload.token || payload.access_token || payload.accessToken;
+  const token = payload.jwt || payload.token || payload.access_token || payload.accessToken;
   if (!token) {
-    throw new Error("В ответе /v1/auth нет token. Проверьте логин и контур (demo/prod).");
+    throw new Error("В ответе /v1/auth нет jwt/token. Проверьте логин и контур (demo/prod).");
   }
+
+  const { begin, end } = last31DayWindow();
   const query = new URLSearchParams({
-    limit: "20",
-    offset: "0",
-    debtorInn: inn,
+    Inn: inn,
+    DateLastModifBegin: begin,
+    DateLastModifEnd: end,
+    Limit: "20",
+    Offset: "0",
   });
-  const messages = await browserRequest(`${base}/v1/messages?${query}`, {
+  const bankrupts = await browserRequest(`${base}/v1/bankrupts?${query}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
-  if (!messages.ok) {
-    throw new Error(`Федресурс messages HTTP ${messages.status}`);
+  if (!bankrupts.ok) {
+    throw new Error(`Федресурс bankrupts HTTP ${bankrupts.status}`);
   }
-  return parseJson(messages.body, "Федресурс вернул не JSON на /v1/messages");
+  const data = parseJson(bankrupts.body, "Федресурс вернул не JSON на /v1/bankrupts");
+  return {
+    inn,
+    period: { begin, end },
+    bankrupts: data.pageData || [],
+    total: data.total ?? 0,
+    note:
+      data.total === 0
+        ? "За последние 31 день записей о банкротстве по этому ИНН нет. Реорганизация/ликвидация без процедуры банкротства сюда не попадает."
+        : undefined,
+  };
 }
