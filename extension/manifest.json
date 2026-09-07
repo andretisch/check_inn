@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Срез — проверка контрагента",
+  "version": "0.1.1",
+  "description": "Официальные API и XML ФНС с компьютера пользователя, без вашего сервера.",
+  "action": {
+    "default_title": "Срез",
+    "default_popup": "index.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://bank-publications-demo.fedresurs.ru/*",
+    "https://bank-publications-prod.fedresurs.ru/*",
+    "https://file.nalog.ru/*",
+    "https://data.nalog.ru/*",
+    "https://www.nalog.gov.ru/*"
+  ]
+}
