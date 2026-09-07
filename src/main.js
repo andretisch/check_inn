@@ -2,17 +2,41 @@ import "./style.css";
 import { normalizeInn, validateInn } from "./inn.js";
 import { parseEgrulXml } from "./parseEgrulXml.js";
 import { evaluateTechFlags } from "./techFlags.js";
-import { SOURCES, isExtensionRuntime, sourceLinks, probeCors } from "./sources.js";
+import { SOURCES, isExtensionRuntime } from "./sources.js";
+import { searchBankruptcy } from "./api/fedresurs.js";
+import { parseFnsOpenDataXml } from "./api/fnsOpenData.js";
+
+const SETTINGS_KEY = "srez-api-settings";
 
 const app = document.querySelector("#app");
 const state = {
   inn: "",
   error: "",
+  notice: "",
   card: null,
   extras: {},
   tech: null,
-  corsNote: null,
+  bankruptcy: null,
+  settings: loadSettings(),
 };
+
+function loadSettings() {
+  try {
+    return {
+      fedresursLogin: "",
+      fedresursPassword: "",
+      fedresursDemo: true,
+      ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"),
+    };
+  } catch {
+    return { fedresursLogin: "", fedresursPassword: "", fedresursDemo: true };
+  }
+}
+
+function saveSettings(next) {
+  state.settings = { ...state.settings, ...next };
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -24,8 +48,8 @@ function escapeHtml(value) {
 
 function modeLabel() {
   return isExtensionRuntime()
-    ? "режим расширения · запросы с этого компьютера"
-    : "статическая страница · живые госсайты закрыты CORS";
+    ? "расширение · официальные API с этого компьютера"
+    : "статическая страница · файлы ФНС локально, REST упирается в CORS";
 }
 
 function renderReport() {
@@ -38,14 +62,14 @@ function renderReport() {
         <div class="report-head">
           <div>
             <h2>Экспресс-срез</h2>
-            <div>Загрузите XML-выписку ФНС или откройте официальные реестры в соседних вкладках.</div>
+            <div>Официальные машиночитаемые каналы: XML ЕГРЮЛ, open data ФНС, REST ЕФРСБ.</div>
           </div>
           <div class="stamp yellow">нет данных</div>
         </div>
         <p class="empty">
-          Браузерный сайт не может прочитать egrul.nalog.ru, pb.nalog.ru, КАД и Федресурс напрямую:
-          у них нет CORS. Без вашего сервера остаются три пути — XML-выписка, расширение Chrome
-          и ручной просмотр официальных страниц.
+          Сайты вроде egrul.nalog.ru и kad.arbitr.ru — не API. Капча там ни при чём для этого контура.
+          Карточка собирается из официального XML ФНС; налоги — из open data; банкротство — из REST Федресурса
+          по вашему логину. Публичного API КАД нет.
         </p>
       </div>
     `;
@@ -64,7 +88,11 @@ function renderReport() {
             </div>`,
         )
         .join("")
-    : `<div class="flag green"><strong>Маркеры оболочки не сработали</strong><p>Это не вердикт ФНС, а отсутствие формальных признаков в загруженных данных.</p></div>`;
+    : `<div class="flag green"><strong>Маркеры оболочки не сработали</strong><p>Это не вердикт ФНС, а отсутствие формальных признаков в загруженных официальных данных.</p></div>`;
+
+  const bank = state.bankruptcy
+    ? `<pre>${escapeHtml(JSON.stringify(state.bankruptcy, null, 2).slice(0, 2500))}</pre>`
+    : `<p class="empty">ЕФРСБ ещё не запрашивали. Нужны логин/пароль официального REST (демо-контур есть в спецификации оператора).</p>`;
 
   return `
     <div class="report">
@@ -84,33 +112,28 @@ function renderReport() {
         <b>Адрес</b><span>${escapeHtml(card.address || "—")}</span>
         <b>Руководитель</b><span>${escapeHtml([card.director?.title, card.director?.name].filter(Boolean).join(" · ") || "—")}</span>
         <b>УК</b><span>${card.capital ? `${card.capital.toLocaleString("ru-RU")} ₽` : "—"}</span>
-        <b>ОКВЭД</b><span>${escapeHtml(card.okved || "—")}</span>
-        <b>Выписка на</b><span>${escapeHtml(card.issuedAt || "—")}</span>
+        <b>Численность</b><span>${state.extras.headcount ?? "—"}</span>
+        <b>Недоимка</b><span>${state.extras.taxDebt != null ? `${Number(state.extras.taxDebt).toLocaleString("ru-RU")} ₽` : "—"}</span>
+        <b>Уплачено налогов</b><span>${state.extras.taxPaid != null ? `${Number(state.extras.taxPaid).toLocaleString("ru-RU")} ₽` : "—"}</span>
       </div>
       <h3>Признаки технической организации</h3>
       <div class="flags">${flags}</div>
-      <h3>Налоги, суды, банкротство</h3>
-      <p>
-        Эти блоки живут в других реестрах. С этой страницы они не скачиваются сами:
-        откройте источники справа. Расширение делает запрос с вашего IP, но капчу ФНС/КАД
-        всё равно нужно пройти вручную.
-      </p>
+      <h3>ЕФРСБ</h3>
+      ${bank}
     </div>
   `;
 }
 
 function render() {
-  const links = sourceLinks(state.inn || "7707083893")
-    .map((link) => `<a href="${link.url}" target="_blank" rel="noreferrer">${escapeHtml(link.title)}</a>`)
-    .join("");
   const sources = SOURCES.map(
     (src) => `
       <div class="src">
         <div>
           <strong>${escapeHtml(src.title)}</strong>
+          <div>${escapeHtml(src.channel)}</div>
           <div>${escapeHtml(src.role)}</div>
         </div>
-        <div>${src.cors ? "CORS есть" : "CORS нет"}</div>
+        <div>${src.kind}</div>
       </div>`,
   ).join("");
 
@@ -121,42 +144,36 @@ function render() {
           <p class="mode">${modeLabel()}</p>
           <h1 class="brand">Срез<span>.</span></h1>
           <p class="lede">
-            Локальная проверка контрагента без вашего бэкенда. Статус ЕГРЮЛ, налоговые дампы,
-            банкротство и суды собираются на этой странице, а HTTP уходит с компьютера пользователя.
+            Клиент без бэкенда: браузер читает официальные XML ФНС и дергает REST ЕФРСБ с этой машины.
+            Ключи не уходят на наш сервер — его нет.
           </p>
         </div>
       </div>
       <form class="search" id="search-form">
         <input id="inn" type="text" inputmode="numeric" placeholder="ИНН 10 или 12 цифр" value="${escapeHtml(state.inn)}" />
-        <button class="primary" type="submit">Проверить</button>
-        <label class="file">Загрузить XML-выписку<input id="xml" type="file" accept=".xml,text/xml,application/xml" /></label>
+        <button class="primary" type="submit">Запросить ЕФРСБ</button>
+        <label class="file">XML ЕГРЮЛ<input id="xml" type="file" accept=".xml,text/xml,application/xml" /></label>
       </form>
-      ${state.corsNote ? `<div class="notice">${escapeHtml(state.corsNote)}</div>` : ""}
+      ${state.notice ? `<div class="notice">${escapeHtml(state.notice)}</div>` : ""}
       <div class="grid">
         ${renderReport()}
         <aside class="side">
           <section class="card">
-            <h3>Официальные вкладки</h3>
-            <p>ИНН копируется, страницы открываются у первоисточника. Браузер не даст прочитать чужой HTML с этого сайта.</p>
-            <div class="links">${links}</div>
-            <div style="margin-top:10px;display:grid;gap:8px">
-              <button class="ghost" type="button" id="copy-inn">Скопировать ИНН</button>
-              <button class="ghost" type="button" id="open-all">Открыть ЕГРЮЛ, ФНС, Федресурс, КАД</button>
-              <button class="ghost" type="button" id="demo">Показать демо-выписку</button>
-            </div>
-          </section>
-          <section class="card">
-            <h3>Почему без сервера</h3>
-            <ul>
-              <li>Обычный fetch() к ФНС/КАД режет CORS.</li>
-              <li>Капча ЕГРЮЛ и КАД не обходится.</li>
-              <li>Расширение ходит с вашего компьютера и не поднимает бэкенд.</li>
-              <li>XML-выписка — единственный полностью автономный канал.</li>
-            </ul>
-          </section>
-          <section class="card">
-            <h3>Источники</h3>
+            <h3>Официальные каналы</h3>
+            <p>Не сайты с формами, а машиночитаемые выгрузки и REST.</p>
             <div class="sources">${sources}</div>
+            <label class="file" style="margin-top:10px">Open data ФНС XML<input id="opendata" type="file" accept=".xml,text/xml,application/xml" /></label>
+            <button class="ghost" type="button" id="demo" style="margin-top:8px;min-height:40px">Демо-выписка</button>
+          </section>
+          <section class="card">
+            <h3>REST Федресурса</h3>
+            <p>Логин хранится только в localStorage этого браузера.</p>
+            <form id="api-form" class="api-form">
+              <input id="fr-login" type="text" placeholder="login" value="${escapeHtml(state.settings.fedresursLogin)}" />
+              <input id="fr-password" type="password" placeholder="password" value="${escapeHtml(state.settings.fedresursPassword)}" />
+              <label class="check"><input id="fr-demo" type="checkbox" ${state.settings.fedresursDemo ? "checked" : ""} /> демо-контур</label>
+              <button class="ghost" type="submit">Сохранить ключи</button>
+            </form>
           </section>
         </aside>
       </div>
@@ -165,12 +182,12 @@ function render() {
 
   document.getElementById("search-form").addEventListener("submit", onSearch);
   document.getElementById("xml").addEventListener("change", onXml);
-  document.getElementById("copy-inn").addEventListener("click", onCopy);
-  document.getElementById("open-all").addEventListener("click", onOpenAll);
+  document.getElementById("opendata").addEventListener("change", onOpenData);
   document.getElementById("demo").addEventListener("click", onDemo);
+  document.getElementById("api-form").addEventListener("submit", onSaveKeys);
 }
 
-function applyCard(card, extras = {}) {
+function applyCard(card, extras = state.extras) {
   state.card = card;
   state.extras = extras;
   state.tech = evaluateTechFlags(card, extras);
@@ -189,15 +206,25 @@ async function onSearch(event) {
     render();
     return;
   }
-  state.error = "";
-  const probe = await probeCors("https://egrul.nalog.ru/");
-  state.corsNote = probe.cors
-    ? "Неожиданно: egrul.nalog.ru ответил на CORS. Живой запрос всё равно может упереться в капчу."
-    : "Проверка CORS: egrul.nalog.ru из этой вкладки недоступен. Загрузите выписку или поставьте расширение.";
-  if (isExtensionRuntime()) {
-    await chrome.runtime.sendMessage({ type: "OPEN_SOURCES", inn });
-    state.corsNote =
-      "Расширение открыло официальные вкладки с вашего компьютера. Капчу нужно пройти вручную, затем сохранить XML-выписку сюда.";
+  if (!state.settings.fedresursLogin || !state.settings.fedresursPassword) {
+    state.notice = "ИНН валиден. Для банкротства сохраните логин REST ЕФРСБ. Карточку статуса даёт XML ЕГРЮЛ, налоги — open data ФНС.";
+    render();
+    return;
+  }
+  try {
+    state.notice = "Запрос к официальному REST ЕФРСБ…";
+    render();
+    state.bankruptcy = await searchBankruptcy({
+      inn,
+      login: state.settings.fedresursLogin,
+      password: state.settings.fedresursPassword,
+      demo: state.settings.fedresursDemo,
+    });
+    state.notice = "ЕФРСБ ответил. Статус ЮЛ по-прежнему из XML интеграции ФНС — это отдельный официальный канал.";
+    state.error = "";
+  } catch (error) {
+    state.error = error.message;
+    state.notice = "";
   }
   render();
 }
@@ -206,8 +233,7 @@ async function onXml(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   try {
-    const text = await file.text();
-    const card = parseEgrulXml(text);
+    const card = parseEgrulXml(await file.text());
     state.inn = card.inn || state.inn;
     applyCard(card);
   } catch (error) {
@@ -216,24 +242,46 @@ async function onXml(event) {
   }
 }
 
-async function onCopy() {
-  const inn = normalizeInn(document.getElementById("inn").value || state.inn);
-  if (!inn) return;
-  await navigator.clipboard.writeText(inn);
+async function onOpenData(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const inn = normalizeInn(document.getElementById("inn").value || state.inn || state.card?.inn);
+  if (!validateInn(inn).ok) {
+    state.error = "Сначала укажите валидный ИНН, затем загрузите open data XML.";
+    render();
+    return;
+  }
+  try {
+    const parsed = parseFnsOpenDataXml(await file.text(), inn);
+    if (!parsed.found) {
+      state.notice = "В этом файле open data ИНН не найден. Нужен набор ФНС (debtam, paytax, sshr), не выписка ЕГРЮЛ.";
+    } else {
+      state.extras = { ...state.extras, ...parsed.fields };
+      state.notice = "Open data ФНС разобраны локально, без сайта «Прозрачный бизнес».";
+      if (state.card) state.tech = evaluateTechFlags(state.card, state.extras);
+    }
+    state.inn = inn;
+    state.error = "";
+  } catch (error) {
+    state.error = error.message;
+  }
+  render();
 }
 
-function onOpenAll() {
-  const inn = normalizeInn(document.getElementById("inn").value || state.inn);
-  state.inn = inn;
-  for (const link of sourceLinks(inn)) {
-    window.open(link.url, "_blank", "noopener,noreferrer");
-  }
+function onSaveKeys(event) {
+  event.preventDefault();
+  saveSettings({
+    fedresursLogin: document.getElementById("fr-login").value.trim(),
+    fedresursPassword: document.getElementById("fr-password").value,
+    fedresursDemo: document.getElementById("fr-demo").checked,
+  });
+  state.notice = "Ключи ЕФРСБ записаны только в этот браузер.";
+  render();
 }
 
 async function onDemo() {
   const res = await fetch("./sample-egrul.xml");
-  const text = await res.text();
-  const card = parseEgrulXml(text);
+  const card = parseEgrulXml(await res.text());
   state.inn = card.inn;
   applyCard(card, { headcount: 1, taxPaid: 0, taxDebt: 240000, fixedAssets: 0 });
 }

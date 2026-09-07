@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Срез — проверка контрагента",
-  "version": "0.1.0",
-  "description": "Локальная проверка контрагента: запросы идут с компьютера пользователя, без вашего сервера.",
+  "version": "0.1.1",
+  "description": "Официальные API и XML ФНС с компьютера пользователя, без вашего сервера.",
   "action": {
     "default_title": "Срез",
     "default_popup": "index.html"
@@ -11,16 +11,12 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["storage", "clipboardWrite", "tabs"],
+  "permissions": ["storage"],
   "host_permissions": [
-    "https://egrul.nalog.ru/*",
-    "https://pb.nalog.ru/*",
-    "https://www.nalog.gov.ru/*",
+    "https://bank-publications-demo.fedresurs.ru/*",
+    "https://bank-publications-prod.fedresurs.ru/*",
     "https://file.nalog.ru/*",
-    "https://bankrot.fedresurs.ru/*",
-    "https://fedresurs.ru/*",
-    "https://kad.arbitr.ru/*",
-    "https://www.vestnik-gosreg.ru/*",
-    "https://fssp.gov.ru/*"
+    "https://data.nalog.ru/*",
+    "https://www.nalog.gov.ru/*"
   ]
 }

@@ -118,6 +118,35 @@ button.ghost,
   display: none;
 }
 
+.api-form {
+  display: grid;
+  gap: 8px;
+}
+
+.api-form input[type="text"],
+.api-form input[type="password"] {
+  font-size: 14px;
+  letter-spacing: 0;
+  padding: 10px 12px;
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #d8cbb6;
+  font-size: 13px;
+}
+
+pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: var(--paper-2);
+  padding: 10px;
+  overflow: auto;
+  max-height: 240px;
+}
+
 .notice,
 .error {
   padding: 12px 14px;

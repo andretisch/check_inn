@@ -2,97 +2,55 @@ export const SOURCES = [
   {
     id: "egrul",
     title: "ЕГРЮЛ / ЕГРИП",
-    owner: "ФНС",
+    channel: "официальная интеграция ФНС, XML 4.07/4.08",
     role: "Статус, директор, адрес, недостоверность, УК",
-    url: "https://egrul.nalog.ru/",
+    url: "https://www.nalog.gov.ru/rn77/service/egrip2/",
+    kind: "files",
     cors: false,
-    captcha: true,
-    live: "xml-or-extension",
-  },
-  {
-    id: "pb",
-    title: "Прозрачный бизнес",
-    owner: "ФНС",
-    role: "Налоги, численность, спецрежим, недоимка",
-    url: "https://pb.nalog.ru/",
-    cors: false,
-    captcha: true,
-    live: "extension-or-file",
   },
   {
     id: "opendata",
-    title: "Open Data ФНС",
-    owner: "ФНС",
-    role: "Дампы недоимки, paytax, правонарушения, МСП",
+    title: "Open Data ФНС, ст. 102 НК",
+    channel: "XML/CSV с nalog.gov.ru/opendata",
+    role: "Недоимка, уплаченные налоги, правонарушения, численность, спецрежим",
     url: "https://www.nalog.gov.ru/opendata/",
+    kind: "files",
     cors: false,
-    captcha: false,
-    live: "file",
   },
   {
     id: "efrsb",
-    title: "ЕФРСБ / Федресурс",
-    owner: "Интерфакс",
+    title: "ЕФРСБ REST",
+    channel: "bank-publications-*.fedresurs.ru, договор с оператором",
     role: "Банкротство и сообщения",
-    url: "https://bankrot.fedresurs.ru/",
+    url: "https://fedresurs.ru/help#bankrupt",
+    kind: "rest",
     cors: false,
-    captcha: false,
-    live: "extension",
   },
   {
     id: "kad",
-    title: "Картотека арбитражных дел",
-    owner: "КАД",
-    role: "Иски, банкротные дела",
+    title: "Арбитраж",
+    channel: "публичного официального API нет",
+    role: "Иски и банкротные дела",
     url: "https://kad.arbitr.ru/",
+    kind: "none",
     cors: false,
-    captcha: true,
-    live: "tab",
-  },
-  {
-    id: "vestnik",
-    title: "Вестник госрегистрации",
-    owner: "ФНС",
-    role: "Предстоящее исключение из ЕГРЮЛ",
-    url: "https://www.vestnik-gosreg.ru/",
-    cors: false,
-    captcha: false,
-    live: "tab",
   },
 ];
-
-export function sourceLinks(inn) {
-  const q = encodeURIComponent(inn);
-  return [
-    { id: "egrul", title: "Открыть ЕГРЮЛ", url: "https://egrul.nalog.ru/" },
-    { id: "pb", title: "Открыть «Прозрачный бизнес»", url: "https://pb.nalog.ru/" },
-    { id: "efrsb", title: "Открыть ЕФРСБ", url: `https://bankrot.fedresurs.ru/` },
-    { id: "kad", title: "Открыть КАД", url: "https://kad.arbitr.ru/" },
-    { id: "vestnik", title: "Открыть Вестник", url: "https://www.vestnik-gosreg.ru/" },
-    { id: "opendata", title: "Каталог open data ФНС", url: "https://www.nalog.gov.ru/opendata/" },
-  ].map((item) => ({ ...item, query: q }));
-}
 
 export function isExtensionRuntime() {
   return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
 }
 
-export async function extensionFetch(url, options = {}) {
-  if (!isExtensionRuntime()) {
-    throw new Error("Запрос к госсайтам из обычной вкладки блокирует CORS. Нужно расширение.");
+export async function browserRequest(url, options = {}) {
+  if (isExtensionRuntime()) {
+    const response = await chrome.runtime.sendMessage({ type: "FETCH", url, options });
+    if (!response) throw new Error("Расширение не ответило на FETCH");
+    return response;
   }
-  const response = await chrome.runtime.sendMessage({ type: "FETCH", url, options });
-  if (!response?.ok) {
-    throw new Error(response?.error || `HTTP ${response?.status || "?"}`);
-  }
-  return response;
-}
-
-export async function probeCors(url) {
   try {
-    const res = await fetch(url, { method: "GET", mode: "cors", signal: AbortSignal.timeout(4000) });
-    return { ok: res.ok, status: res.status, cors: true };
+    const res = await fetch(url, { ...options, mode: "cors", signal: options.signal || AbortSignal.timeout(15000) });
+    return { ok: res.ok, status: res.status, body: await res.text() };
   } catch (error) {
-    return { ok: false, status: 0, cors: false, error: String(error.message || error) };
+    return { ok: false, status: 0, body: "", error: String(error.message || error) };
   }
 }
